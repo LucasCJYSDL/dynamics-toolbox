@@ -10,6 +10,7 @@ import hydra.utils
 import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig
+from contextlib import nullcontext
 
 from dynamics_toolbox.constants import sampling_modes
 from dynamics_toolbox.models.pl_models.sequential_models.abstract_sequential_model \
@@ -143,6 +144,17 @@ class RPNN(AbstractSequentialModel):
             logvar = self._max_logvar - F.softplus(self._max_logvar - logvar)
             logvar = self._min_logvar + F.softplus(logvar - self._min_logvar)
         return {'mean': mean, 'logvar': logvar}
+    
+    def get_mem_out(self, x):
+        """
+        Get the sequence of hidden states.
+        """
+        encoded = self._encoder(x)
+        if self._use_layer_norm:
+            encoded = self._layer_norm(encoded)
+        mem_out = self._memory_unit(encoded)[0]
+
+        return mem_out
 
     def loss(self, net_out: Dict[str, torch.Tensor], batch: Sequence[torch.Tensor]) -> \
             Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
@@ -182,7 +194,7 @@ class RPNN(AbstractSequentialModel):
         stats['loss'] = loss.item()
         return loss, stats
 
-    def single_sample_output_from_torch(self, net_in: torch.Tensor) -> Tuple[
+    def single_sample_output_from_torch(self, net_in: torch.Tensor, with_grad=False) -> Tuple[
             torch.Tensor, Dict[str, Any]]:
         """Get the output for a single sample in the model.
 
@@ -208,22 +220,28 @@ class RPNN(AbstractSequentialModel):
                 raise ValueError('Number of inputs does not match previously given '
                                  f'number. Expected {tocompare.shape[1]} but received'
                                  f' {net_in.shape[0]}.')
-        with torch.no_grad():
+        
+        context = torch.no_grad() if not with_grad else nullcontext()
+
+        with context:
             encoded = self._encoder(net_in).unsqueeze(1)
             if self._use_layer_norm:
                 encoded = self._layer_norm(encoded)
             mem_out, hidden_out = self._memory_unit(encoded, self._hidden_state)
             if self._record_history:
                 self._hidden_state = hidden_out
+                
             mean_predictions, logvar_predictions =\
                 (output.squeeze(1) for output in
-                 self._decoder(torch.cat([encoded, mem_out], dim=-1)))
+                self._decoder(torch.cat([encoded, mem_out], dim=-1)))
+            
         std_predictions = (0.5 * logvar_predictions).exp()
         if self._sample_mode == sampling_modes.SAMPLE_FROM_DIST:
             predictions = (torch.randn_like(mean_predictions) * std_predictions
                            + mean_predictions)
         else:
             predictions = mean_predictions
+
         info = {'predictions': predictions,
                 'mean_predictions': mean_predictions,
                 'std_predictions': std_predictions}
