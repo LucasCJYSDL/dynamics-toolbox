@@ -44,6 +44,7 @@ def load_model_from_log_dir(
         if 'checkpoints' in dirs and len(os.listdir(os.path.join(root, 'checkpoints'))):
             checkpoint_paths.append(os.path.join(root, 'checkpoints'))
             break
+
     # Figure out each version of the paths.
     if len(checkpoint_paths) > 1:
         version_nums = []
@@ -152,8 +153,9 @@ def load_ensemble_from_parent_dir(
         children = [children[cidx] for cidx in best_idxs[:load_n_best_models]]
     for child in children:
         child = os.path.join(parent_dir, child)
-        if os.path.isdir(child) and 'config.yaml' in os.listdir(child):
+        if os.path.isdir(child) and 'config.yaml' in os.listdir(child) and os.path.isdir(os.path.join(child, 'model')):
             paths.append(child)
+
     return load_ensemble_from_list_of_log_dirs(
         paths,
         sample_mode=sample_mode,
