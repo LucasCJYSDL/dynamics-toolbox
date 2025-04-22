@@ -81,8 +81,6 @@ class RPNN(AbstractSequentialModel):
         self.rnn_type = rnn_type.lower()
         if rnn_type.lower() == 'gru':
             rnn_class = torch.nn.GRU
-        elif rnn_type.lower() == 'lstm':
-            rnn_class = torch.nn.LSTM
         else:
             raise ValueError(f'Cannot recognize RNN type {rnn_type}')
         self._memory_unit = rnn_class(encode_dim, rnn_hidden_size,
@@ -205,21 +203,14 @@ class RPNN(AbstractSequentialModel):
             The predictions for a single function sample.
         """
         if self._hidden_state is None:
-            if self.rnn_type == 'gru':
-                self._hidden_state = torch.zeros(self._num_layers, net_in.shape[0],
-                                                 self._hidden_size, device=self.device)
-            else:
-                self._hidden_state = tuple(
-                    torch.zeros(self._num_layers, net_in.shape[0],
-                                self._hidden_size, device=self.device)
-                    for _ in range(2))
+            self._hidden_state = torch.zeros(self._num_layers, net_in.shape[0],
+                                                self._hidden_size, device=self.device)
+
         else:
-            tocompare = (self._hidden_state if self.rnn_type == 'gru'
-                         else self._hidden_state[0])
-            if tocompare.shape[1] != net_in.shape[0]:
-                raise ValueError('Number of inputs does not match previously given '
-                                 f'number. Expected {tocompare.shape[1]} but received'
-                                 f' {net_in.shape[0]}.')
+            if self._hidden_state.shape[1] != net_in.shape[0]:
+                self._hidden_state = self._hidden_state.repeat(1, net_in.shape[0], 1)
+                if self._hidden_state.shape[1] != net_in.shape[0]:
+                    raise ValueError('Batchsize of inputs does not match the one of hidden states.')
         
         context = torch.no_grad() if not with_grad else nullcontext()
 
